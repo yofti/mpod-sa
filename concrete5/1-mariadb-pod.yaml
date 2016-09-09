@@ -1,0 +1,34 @@
+kind: Pod
+apiVersion: v1
+metadata:
+  name: mariadb
+  labels:
+    name: mariadb
+    role: mariadb
+spec:
+  containers:
+    - name: mariadb
+      # local copy of docker.io/mariadb
+      image: kube-master:5000/mariadb
+      ports:
+        - name: mariadb
+          containerPort: 3306
+      env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: 1234Qwer
+        - name: MYSQL_USER
+          value: 5dbadmin
+        - name: MYSQL_PASSWORD
+          value: 1234Qwer
+        - name: MYSQL_DATABASE
+          value: c5db
+      volumeMounts:
+          # name must match the volume name below
+        - name: mariadb-cinder-storage
+          # mount path within the container
+          mountPath: /var/lib/mysql
+  volumes:
+  - name: mariadb-cinder-storage
+    cinder:
+     volumeID: 3e534538-199f-48fe-99e6-aeea5e13ff07
+     fsType: ext4

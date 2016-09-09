@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: concrete5
+  name: concrete5
+spec:
+  type: "LoadBalancer"
+  ports:
+    - port: 30900
+      name: concrete5-80
+      targetPort: 80
+      nodePort: 30900
+    - port: 30943
+      name: concrete5-443
+      targetPort: 80
+      nodePort: 30943
+  selector:
+    app: concrete5

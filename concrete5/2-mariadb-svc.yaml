@@ -1,0 +1,14 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: mariadb
+  labels:
+    name: mariadb
+spec:
+  clusterIP: 10.254.200.130
+  ports:
+    - port: 3306
+      targetPort: mariadb
+  selector:
+    name: mariadb
+    role: mariadb

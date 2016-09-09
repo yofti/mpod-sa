@@ -1,0 +1,114 @@
+heat_template_version: 2014-10-16
+description: Deploy GitLab Instance
+parameters:
+  tenant_group:
+    type: string
+    label: Tenant Group Number
+    description: Tenant Group 1 = Tenant1 and 2 = Tenant2 etc.
+    default: 9
+  image:
+    type: string
+    description: Image used for servers
+    ## default: CentOS7-1602
+    default: mpod-sa-gitlab-snap-160422
+  key:
+    type: string
+    description: SSH key to connect to the servers
+    default: mpod-key
+  gitlab_flavor:
+    type: string
+    description: flavor used by GitLab server
+    default: m1.small
+  private_network:
+    type: string
+    label: Private network name or ID
+    description: Network to attach instance to.
+    ## default: tenant1_net
+    default: dev_mpod_net
+  gitlab_static_ip:
+    type: string
+    label: Private Static IP
+    description: Static IP in Private Network
+    default: 10.90.0.22
+resources:
+  gitlab:
+    type: OS::Nova::Server
+    properties:
+      flavor: { get_param: gitlab_flavor }
+      image: { get_param: image }
+      key_name: { get_param: key }
+      name: gitlab
+      networks:
+        - fixed_ip: { get_param: gitlab_static_ip }
+          network: { get_param: private_network }
+      security_groups: 
+        - { get_resource: gitlab_secgroup }
+      user_data_format: RAW
+      user_data:
+            str_replace:
+              template: |
+                #!/bin/bash -v
+                # Setup 'centos' password (lab environment)
+                PW="1234Qwer"
+                (
+                echo "$PW"
+                echo "$PW"
+                ) | passwd --stdin centos
+                # Identify local IP
+                export MYIP=`ip addr show eth0 | grep 'inet ' | cut -d' ' -f6 | cut -d'/' -f1 | awk '{print $1}'`
+                echo "Current IP:" $MYIP       >> /etc/issue
+                echo "10.TENANT0.0.20 devbox.lab   devbox  " >> /etc/hosts
+                echo "10.TENANT0.0.21 registry.lab registry" >> /etc/hosts
+                echo "10.TENANT0.0.22 gitlab.lab   gitlab  " >> /etc/hosts
+                # enable SMTP (TODO: need to edit /etc/postfix/main.cf)
+                #@@@ yum -y install postfix
+                #@@@ systemctl restart postfix 
+                #@@@ systemctl enable postfix
+                # disable firewall (lab environment)
+                #@@@ systemctl stop firewalld
+                #@@@ systemctl disable firewalld
+                # Download GitLab Installer (TODO: fix FQDN in GitLab configuration)
+                # Default: user "root" password "5iveL!fe"
+                #@@@ curl -O https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.rpm.sh 
+                #@@@ sh script.rpm.sh
+                #@@@ yum -y install gitlab-ce
+                # Configure the external URL the private IP address
+                sed -i "/^external_url/c external_url 'http://gitlab.lab'" /etc/gitlab/gitlab.rb
+                gitlab-ctl reconfigure
+              params:
+                TENANT: { get_param: tenant_group }
+  gitlab_secgroup:
+     type: OS::Neutron::SecurityGroup
+     properties:
+       rules:
+          - protocol: icmp
+            remote_ip_prefix: 0.0.0.0/0
+          - protocol: tcp
+            remote_ip_prefix: 0.0.0.0/0
+            port_range_min: 22
+            port_range_max: 22
+          - protocol: tcp
+            remote_ip_prefix: 0.0.0.0/0
+            port_range_min: 80
+            port_range_max: 80
+          - protocol: tcp
+            remote_ip_prefix: 0.0.0.0/0
+            port_range_min: 443
+            port_range_max: 443
+          - protocol: tcp
+            remote_ip_prefix: 10.10.0.0/24
+            port_range_min: 0
+            port_range_max: 65535
+          - protocol: udp
+            remote_ip_prefix: 10.10.0.0/24
+            port_range_min: 0
+            port_range_max: 65535
+
+# outputs:
+#   gitlab_private_ip:
+#     description: IP address of the deployed compute instance
+#     value: { get_attr: [gitlab, first_address] }
+
+
+
+

@@ -1,0 +1,39 @@
+before_script:
+ - echo "Starting Gitlab-CI script"
+ - uname -a
+
+stages:
+    - test
+    - deploy
+
+test_acmeweb:
+    stage: test
+    tags:
+        - test
+        - docker
+    script:
+        - docker info
+        - docker pull kube-master:5000/mariadb
+        - docker pull kube-master:5000/concrete5.7
+        - make docker_deploy
+        - echo "Sleeping to allow containers to become available"
+        - sleep 60 ; echo "Wait for containers to be ready"
+        - echo "Testing Concrete5 Web"
+        - curl localhost:50080
+        - echo "Testing MariaDB"
+        - curl localhost:50006
+        - make docker_clean
+
+deploy_acmeweb:
+    stage: deploy
+    tags:
+        - prod
+        - kube
+    script:
+        - kubectl version
+        - make kube_deploy
+        - echo "Sleeping to allow containers to become available"
+        - sleep 120 ; echo "Wait for containers to be ready"
+        - make kube_status
+        - echo "Testing deployment"
+        - make kube_test

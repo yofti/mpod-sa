@@ -1,0 +1,294 @@
+heat_template_version: 2014-10-16
+description: Deploy Kubernetes Workers (minion) with CentOS 
+parameters:
+  tenant_group:
+    type: string
+    label: Tenant Group Number
+    description: Tenant Group 1 = Tenant1 and 2 = Tenant2 etc.
+    default: 9
+  image:
+    type: string
+    description: Image used for servers (CentOS 7)
+    default: CentOS7-1602
+  key:
+    type: string
+    description: SSH key to connect to the servers
+    default: mpod-key
+  docker_node_flavor:
+    type: string
+    description: flavor used by docker nodes
+    default: m1.small
+  private_network:
+    type: string
+    label: Private network name or ID
+    description: Network to attach instance to.
+    ## default: tenant1_net
+    default: dev_mpod_net
+  kube_master_ip:
+    type: string
+    label: Kubernetes Master IP 
+    description: Kube Master IP
+    default: 10.90.0.35
+  num_minions:
+    type: string
+    label: Number of Minions
+    description: Number of Minions (Workers) to deploy
+    default: 3
+  os_username:
+    type: string
+    label: OpenStack Username
+    description: OpenStack Username
+    default: labuser
+  os_password:
+    type: string
+    label: OpenStack User Password
+    description: OpenStack User Password
+    default: your-password-here
+  os_tenantid:
+    type: string
+    label: OpenStack Tenant ID
+    description: OpenStack Tenant ID (uuid)
+    default: 1dda0c46053e4f37b6cb15685b1d91e3
+  etcd01_ip:
+    type: string
+    label: etcd01 IP address
+    description: etcd01 IP address
+    default: 10.90.0.31
+  etcd02_ip:
+    type: string
+    label: etcd02 IP address
+    description: etcd01 IP address
+    default: 10.90.0.32
+  etcd03_ip:
+    type: string
+    label: etcd03 IP address
+    description: etcd01 IP address
+    default: 10.90.0.33
+
+resources:
+  userdata:
+    type: OS::Heat::MultipartMime
+    properties:
+      parts:
+      - config: { get_resource: user_firefly_config }
+      - config: { get_resource: hosts_config }
+      - config: { get_resource: kube_repo_config }
+      - config: { get_resource: flanneld_install }
+      - config: { get_resource: flanneld_config }
+      - config: { get_resource: kube_worker_config }
+      - config: { get_resource: kube_install }
+      - config: { get_resource: done_message }
+
+  user_firefly_config:
+    type: OS::Heat::CloudConfig 
+    properties:
+      cloud_config:
+        merge_how: dict(recurse_array)+list(append)
+        users:
+          - default
+          - name: firefly
+            gecos: Firefly Educate
+            sudo: ALL=(ALL) NOPASSWD:ALL
+            lock_passwd: false
+            passwd: $1$lab$89a84YXJ0/sRp7gAga9Q./
+
+  hosts_config:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $KUBE_HOST    : { get_param: kube_master_ip }
+          template: |
+            #cloud-config
+            merge_how: dict(recurse_array)+list(append)
+            write_files:
+              - path: /etc/hosts
+                permissions: '0644'
+                content: |
+                  127.0.0.1   localhost localhost.localdomain
+                  $KUBE_HOST kube-master kube-master.novalocal
+
+  flanneld_install:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $KUBE_HOST    : { get_param: kube_master_ip }
+          template: |
+            #!/bin/bash -v
+            yum install -y flannel
+            yum install -y epel-release nano nfs-utils
+
+  flanneld_config:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $KUBE_HOST    : { get_param: kube_master_ip}
+            $ETCD01 : { get_param: etcd01_ip }
+            $ETCD02 : { get_param: etcd02_ip }
+            $ETCD03 : { get_param: etcd03_ip }
+          template: |
+            #cloud-config
+            merge_how: dict(recurse_array)+list(append)
+            write_files:
+              - path:  /etc/sysconfig/flanneld
+                permissions: '0644'
+                # This is not required in the master. It is just to help with troubleshooting
+                content: |
+                  # Flanneld configuration options
+                  # etcd url location.  Point this to the server where etcd runs
+                  FLANNEL_ETCD="http://$ETCD01:4001,http://$ETCD02:4001,http://$ETCD03:4001"
+                  # etcd config key.  This is the configuration key that flannel queries
+                  # For address range assignment
+                  FLANNEL_ETCD_KEY="/flannel/network"
+                  # Any additional options that you want to pass
+                  FLANNEL_OPTIONS=""
+
+  kube_repo_config:
+    type: OS::Heat::CloudConfig 
+    properties:
+      cloud_config:
+        merge_how: dict(recurse_array)+list(append)
+        yum_repos:
+          # The name of the repository
+          kube-repo:
+              name: kube-repo
+              baseurl: http://cbs.centos.org/repos/virt7-docker-common-release/x86_64/os/
+              enabled: true
+              failovermethod: priority
+              gpgcheck: false
+              description: Kube-repos (virt7-docker-common-release)
+
+  kube_worker_config:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $KUBE_HOST    : { get_param: kube_master_ip }
+            $OS_USERNAME  : { get_param: os_username }
+            $OS_PASSWORD  : { get_param: os_password }  
+            $OS_TENANTID  : { get_param: os_tenantid }  
+          template: |
+            #cloud-config
+            merge_how: dict(recurse_array)+list(append)
+            write_files:
+              - path: /etc/kubernetes/kubelet
+                permissions: '0644'
+                content: |
+                  # The address for the info server to serve on (set to 0.0.0.0 or "" for all interfaces)
+                  KUBELET_ADDRESS="--address=0.0.0.0"
+                  # The port for the info server to serve on
+                  KUBELET_PORT="--port=10250"
+                  # location of the api-server
+                  KUBELET_API_SERVER="--api-servers=http://$KUBE_HOST:8080"
+                  # pod infrastructure container
+                  KUBELET_POD_INFRA_CONTAINER="--pod-infra-container-image=registry.access.redhat.com/rhel7/pod-infrastructure:latest"
+                  # Additional ARGS
+                  KUBELET_ARGS="--cloud-provider=openstack --cloud-config=/etc/kubernetes/cloud.conf"
+                  # You may leave this blank to use the actual hostname
+                  #KUBELET_HOSTNAME="--hostname-override=<worker-ip-address>"
+              - path: /etc/kubernetes/config
+                permissions: '0644'
+                content: |
+                  # logging to stderr means we get it in the systemd journal
+                  KUBE_LOGTOSTDERR="--logtostderr=true"
+                  # journal message level, 0 is debug
+                  KUBE_LOG_LEVEL="--v=0"
+                  # Should this cluster be allowed to run privileged docker containers
+                  KUBE_ALLOW_PRIV="--allow_privileged=true"
+                  # How the controller-manager, scheduler, and proxy find the apiserver
+                  KUBE_MASTER="--master=http://$KUBE_HOST:8080"
+              - path: /etc/kubernetes/cloud.conf
+                permissions: '0644'
+                content: |
+                  [Global]
+                  auth-url=https://api-frfly1.client.metacloud.net:5000/v2.0
+                  region=RegionOne
+                  username=$OS_USERNAME
+                  password=$OS_PASSWORD
+                  tenant-id=$OS_TENANTID
+              - path: /usr/local/bin/set-kube-worker-customs.sh
+                permissions: '0755'
+                content: |
+                  #!/bin/sh
+                  WORKER_FQDN=`hostname`
+                  WORKER_SHORT=`hostname -s`
+                  WORKER_IP=`ip addr show eth0 | grep 'inet ' | cut -d' ' -f6 | cut -d'/' -f1 | awk '{print $1}'`
+                  # Setup local registry
+                  echo 'INSECURE_REGISTRY="--insecure-registry kube-master:5000" ' >> /etc/sysconfig/docker
+                  # Register local ip at configuration files
+                  echo 'KUBELET_HOSTNAME="--hostname-override='${WORKER_SHORT}'"' >> /etc/kubernetes/kubelet
+                  echo "${WORKER_IP} ${WORKER_SHORT} ${WORKER_FQDN} ${WORKER_SHORT}.novalocal" >> /etc/hosts 
+                  # Enable services for NFS mounts
+                  systemctl enable rpcbind rpc-statd
+                  # END OF FILE
+
+  kube_install:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $KUBE_HOST    : { get_param: kube_master_ip }
+          template: |
+            #!/bin/bash -v
+            yum install -y docker docker-logrotate kubernetes
+            sh /usr/local/bin/set-kube-worker-customs.sh
+            # Assumes flannel RPM already installed
+            systemctl enable flanneld docker kube-proxy kubelet
+            # Force flanneld to start first
+            systemctl start flanneld
+            # Docker must be restarted after flannel and before the kubernetes services
+            #systemctl restart docker 
+            #systemctl start docker kube-proxy
+            # Enable NFS RW with SELINUX
+            setsebool -P virt_use_nfs 1
+            # Disable SELINUX
+            setenforce Permissive
+            sed -i -e "s/SELINUX=enforcing/SELINUX=permissive/" /etc/selinux/config
+            echo "NOTE: REBOOTING VM FOR SDN CHANGES TO TAKE EFFECT (AVOIDING FLANNEL/DOCKER BUG)"
+            # END
+
+  done_message:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $KUBE_HOST    : { get_param: kube_master_ip }
+          template: |
+            #cloud-config
+            merge_how: dict(recurse_array)+list(append)
+            final_message: "DONE!!! After $UPTIME seconds worker is finally ready for MPOD-SA labs."
+            runcmd:
+              - [reboot]
+
+  minions_cluster:
+    type: OS::Heat::ResourceGroup 
+    properties:
+      count: { get_param: num_minions }
+      resource_def:
+        type: OS::Nova::Server
+        properties:
+          flavor: { get_param: docker_node_flavor }
+          image: { get_param: image }
+          key_name: { get_param: key }
+          name: minion%index%
+          networks:
+            - network: { get_param: private_network }
+              fixed_ip:
+                str_replace:
+                  template: 10.$TENANT0.0.4%index%
+                  params:
+                    $TENANT : { get_param: tenant_group }
+          security_groups:
+            - permit_all_secgroup
+          user_data_format: RAW
+          user_data: { get_resource: userdata }
+
+# END OF FILE

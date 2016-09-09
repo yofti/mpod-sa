@@ -1,0 +1,258 @@
+heat_template_version: 2014-10-16
+description: Deploy Kubernetes Master with CentOS7 
+parameters:
+  tenant_group:
+    type: string
+    label: Tenant Group Number
+    description: Tenant Group 1 = Tenant1 and 2 = Tenant2 etc.
+    default: 9
+  image:
+    type: string
+    description: Image used for servers (CentOS 7)
+    default: CentOS7-1602
+  key:
+    type: string
+    description: SSH key to connect to the servers
+    default: mpod-key
+  docker_node_flavor:
+    type: string
+    description: flavor used by docker nodes
+    default: m1.small
+  private_network:
+    type: string
+    label: Private network name or ID
+    description: Network to attach instance to.
+    ## default: tenant1_net
+    default: dev_mpod_net
+  kube_master_ip:
+    type: string
+    label: Kubernetes Master IP 
+    description: Kube Master IP
+    default: 10.90.0.35
+  etcd01_ip:
+    type: string
+    label: etcd01 IP address
+    description: etcd01 IP address
+    default: 10.90.0.31
+  etcd02_ip:
+    type: string
+    label: etcd02 IP address
+    description: etcd01 IP address
+    default: 10.90.0.32
+  etcd03_ip:
+    type: string
+    label: etcd03 IP address
+    description: etcd01 IP address
+    default: 10.90.0.33
+
+resources:
+  userdata:
+    type: OS::Heat::MultipartMime
+    properties:
+      parts:
+      - config: { get_resource: user_firefly_config }
+      - config: { get_resource: hosts_config }
+      - config: { get_resource: kube_repo_config }
+      - config: { get_resource: flanneld_install }
+      - config: { get_resource: flanneld_config }
+      - config: { get_resource: kube_master_config }
+      - config: { get_resource: kube_install }
+      - config: { get_resource: done_message }
+
+  user_firefly_config:
+    type: OS::Heat::CloudConfig 
+    properties:
+      cloud_config:
+        merge_how: dict(recurse_array)+list(append)
+        users:
+          - default
+          - name: firefly
+            gecos: Firefly Educate
+            sudo: ALL=(ALL) NOPASSWD:ALL
+            lock_passwd: false
+            passwd: $1$lab$89a84YXJ0/sRp7gAga9Q./
+
+  hosts_config:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $KUBE_HOST    : { get_param: kube_master_ip }
+            $TENANT       : { get_param: tenant_group }
+          template: |
+            #cloud-config
+            merge_how: dict(recurse_array)+list(append)
+            write_files:
+              - path: /etc/hosts
+                permissions: '0644'
+                content: |
+                  127.0.0.1   localhost localhost.localdomain
+                  10.$TENANT0.0.35 kube-master kube-master.novalocal
+                  10.$TENANT0.0.40 minion0 minion0.novalocal
+                  10.$TENANT0.0.41 minion1 minion1.novalocal
+                  10.$TENANT0.0.42 minion2 minion2.novalocal
+                  10.$TENANT0.0.43 minion3 minion3.novalocal
+                  10.$TENANT0.0.44 minion4 minion4.novalocal
+                  10.$TENANT0.0.45 minion5 minion5.novalocal
+  flanneld_install:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $KUBE_HOST    : { get_param: kube_master_ip }
+          template: |
+            #!/bin/bash -v
+            yum install -y flannel
+            yum install -y epel-release nano
+            echo "Done installing Flannel SDN"
+
+  flanneld_config:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $KUBE_HOST    : { get_param: kube_master_ip}
+            $ETCD01 : { get_param: etcd01_ip }
+            $ETCD02 : { get_param: etcd02_ip }
+            $ETCD03 : { get_param: etcd03_ip }
+          template: |
+            #cloud-config
+            merge_how: dict(recurse_array)+list(append)
+            write_files:
+              - path:  /etc/sysconfig/flanneld
+                permissions: '0644'
+                # This is not required in the master. It is just to help with troubleshooting
+                content: |
+                  # Flanneld configuration options
+                  # etcd url location.  Point this to the server where etcd runs
+                  FLANNEL_ETCD="http://$ETCD01:4001,http://$ETCD02:4001,http://$ETCD03:4001"
+                  # etcd config key.  This is the configuration key that flannel queries
+                  # For address range assignment
+                  FLANNEL_ETCD_KEY="/flannel/network"
+                  # Any additional options that you want to pass
+                  FLANNEL_OPTIONS=""
+
+  kube_repo_config:
+    type: OS::Heat::CloudConfig 
+    properties:
+      cloud_config:
+        merge_how: dict(recurse_array)+list(append)
+        yum_repos:
+          # The name of the repository
+          kube-repo:
+              name: kube-repo
+              baseurl: http://cbs.centos.org/repos/virt7-docker-common-release/x86_64/os/
+              enabled: true
+              failovermethod: priority
+              gpgcheck: false
+              description: Kube-repos (virt7-docker-common-release)
+
+  kube_master_config:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $KUBE_HOST    : { get_param: kube_master_ip}
+            $ETCD01 : { get_param: etcd01_ip }
+            $ETCD02 : { get_param: etcd02_ip }
+            $ETCD03 : { get_param: etcd03_ip }
+          template: |
+            #cloud-config
+            merge_how: dict(recurse_array)+list(append)
+            write_files:
+              - path: /etc/kubernetes/apiserver
+                permissions: '0644'
+                content: |
+                  KUBE_API_ADDRESS="--insecure-bind-address=0.0.0.0"
+                  KUBE_API_PORT="--insecure-port=8080"
+                  KUBELET_PORT="--kubelet_port=10250"
+                  KUBE_ETCD_SERVERS="--etcd_servers=http://$ETCD01:4001,http://$ETCD02:4001,http://$ETCD03:4001"
+                  KUBE_SERVICE_ADDRESSES="--service-cluster-ip-range=10.254.0.0/16"
+                  KUBE_ADMISSION_CONTROL="--admission_control=NamespaceLifecycle,LimitRanger,SecurityContextDeny,ResourceQuota"
+                  KUBE_API_ARGS=""
+              - path: /etc/kubernetes/config
+                permissions: '0644'
+                content: |
+                  # logging to stderr means we get it in the systemd journal
+                  KUBE_LOGTOSTDERR="--logtostderr=true"
+                  # journal message level, 0 is debug
+                  KUBE_LOG_LEVEL="--v=0"
+                  # Should this cluster be allowed to run privileged docker containers
+                  KUBE_ALLOW_PRIV="--allow_privileged=true"
+                  # How the controller-manager, scheduler, and proxy find the apiserver
+                  KUBE_MASTER="--master=http://127.0.0.1:8080"
+              - path: /usr/local/bin/set-kube-customs.sh
+                permissions: '0755'
+                owner: root:root
+                content: |
+                  #!/bin/sh
+                  # Create Flanneld Network Definition
+                  /bin/etcdctl --endpoint "http://$ETCD01:4001,http://$ETCD02:4001,http://$ETCD03:4001" rm /flannel/network/ --recursive
+                  /bin/etcdctl --endpoint "http://$ETCD01:4001,http://$ETCD02:4001,http://$ETCD03:4001" mk /flannel/network/config '{"Network":"10.1.0.0/16"}'
+                  # Include local regsitry
+                  echo 'INSECURE_REGISTRY="--insecure-registry kube-master:5000" ' >> /etc/sysconfig/docker
+                  # END OF FILE
+
+  kube_install:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $KUBE_HOST    : { get_param: kube_master_ip }
+          template: |
+            #!/bin/bash -v
+            yum install -y docker docker-logrotate kubernetes etcd
+            # Setup Custom Parameters
+            sh /usr/local/bin/set-kube-customs.sh
+            # Assumes flannel RPM already installed
+            systemctl enable flanneld docker kube-apiserver kube-controller-manager kube-scheduler
+            # Force flanneld to start first
+            systemctl start flanneld
+            # Docker must be restarted after flannel and before the kubernetes services
+            #systemctl restart docker 
+            #systemctl start kube-apiserver kube-controller-manager kube-scheduler
+            # Disable SELINUX
+            setenforce Permissive
+            sed -i -e "s/SELINUX=enforcing/SELINUX=permissive/" /etc/selinux/config
+            echo "NOTE: REBOOTING VM FOR SDN CHANGES TO TAKE EFFECT (AVOIDING FLANNEL/DOCKER BUG)"
+            # Install Gitlab CI Runner (for CI/CD over kubernetes)
+            curl -L https://packages.gitlab.com/install/repositories/runner/gitlab-ci-multi-runner/script.rpm.sh | bash
+            yum -y install gitlab-ci-multi-runner
+            # Enable user/password authentication (for GitLab CI/CD)
+            sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/g' /etc/ssh/sshd_config
+            # END
+
+  done_message:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $KUBE_HOST    : { get_param: kube_master_ip }
+          template: |
+            #cloud-config
+            merge_how: dict(recurse_array)+list(append)
+            final_message: "DONE!!! After $UPTIME seconds $KUBE_HOST is finally ready for MPOD-SA labs."
+            runcmd:
+              - [reboot]
+  kube_master:
+    type: OS::Nova::Server
+    properties:
+      flavor: { get_param: docker_node_flavor }
+      image: { get_param: image }
+      key_name: { get_param: key }
+      name: kube-master
+      networks:
+        - network: { get_param: private_network }
+          fixed_ip: { get_param: kube_master_ip}
+      security_groups:
+        - permit_all_secgroup
+      user_data_format: RAW
+      user_data: { get_resource: userdata }
+
+# END OF FILE

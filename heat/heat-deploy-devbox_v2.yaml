@@ -1,0 +1,165 @@
+heat_template_version: 2014-10-16
+description: Deploy devbox (jumphost)
+parameters:
+  tenant_group:
+    type: string
+    label: Tenant Group Number
+    description: Tenant Group 1 = Tenant1 and 2 = Tenant2 etc.
+    default: 9
+  image:
+    type: string
+    description: Image used for servers
+    ##default: CentOS7-1602
+    default: mpod-sa-devbox-snap-160420
+  key:
+    type: string
+    description: SSH key to connect to the servers
+    default: mpod-key
+  devbox_flavor:
+    type: string
+    description: flavor used by master server
+    default: m1.medium
+  private_network:
+    type: string
+    label: Private network name or ID
+    description: Network to attach instance to.
+    ## default: tenant1_net
+    default: dev_mpod_net
+  devbox_ip:
+    type: string
+    label: DevBox Static IP
+    description: Static IP for DevBox VM
+    default: 10.90.0.20
+resources:
+  devbox_secgroup:
+     type: OS::Neutron::SecurityGroup
+     properties:
+       description: Allow SSH HTTP HTTPS
+       rules:
+          - direction: ingress
+            remote_ip_prefix: 0.0.0.0/0
+            protocol: icmp
+          - direction: ingress
+            remote_ip_prefix: 0.0.0.0/0
+            protocol: tcp
+            port_range_min: 22
+            port_range_max: 22
+          - direction: ingress
+            remote_ip_prefix: 0.0.0.0/0
+            protocol: tcp
+            port_range_min: 80
+            port_range_max: 80
+          - direction: ingress
+            remote_ip_prefix: 0.0.0.0/0
+            protocol: tcp
+            port_range_min: 443
+            port_range_max: 443
+          - direction: ingress
+            remote_ip_prefix: 0.0.0.0/0
+            protocol: tcp
+            port_range_min: 5000
+            port_range_max: 10000
+          - direction: ingress
+            remote_ip_prefix: 0.0.0.0/0
+            protocol: tcp
+            port_range_min: 40000
+            port_range_max: 50000           
+
+  devbox:
+    type: OS::Nova::Server
+    properties:
+      flavor: { get_param: devbox_flavor }
+      image: { get_param: image }
+      key_name: { get_param: key }
+      name: devbox
+      networks:
+        - network: { get_param: private_network }
+          fixed_ip: { get_param: devbox_ip }
+      security_groups:
+        - { get_resource: devbox_secgroup }
+      user_data_format: RAW
+      user_data:
+            str_replace:
+              template: |
+                #!/bin/bash -v
+                # Setup 'centos' password (lab environment)
+                PW="1234Qwer"
+                (
+                echo "$PW"
+                echo "$PW"
+                ) | passwd --stdin centos
+                # Identify local IP
+                echo "Current IP:" $DEVBOX_IP       >> /etc/issue
+                # Modify /etc/hosts
+                echo "10.$TENANT0.0.20 devbox.lab   devbox  devbox.novalocal" >> /etc/hosts
+                echo "10.$TENANT0.0.21 registry.lab registry registry.novalocal" >> /etc/hosts
+                echo "10.$TENANT0.0.22 gitlab.lab   gitlab  gitlab.novalocal" >> /etc/hosts
+                echo "10.$TENANT0.0.35 kube-master   kube-master.novalocal  " >> /etc/hosts
+                echo "10.$TENANT0.0.40 minion0   minion0.novalocal  " >> /etc/hosts
+                echo "10.$TENANT0.0.41 minion1   minion1.novalocal  " >> /etc/hosts
+                echo "10.$TENANT0.0.42 minion2   minion2.novalocal  " >> /etc/hosts
+                echo "10.$TENANT0.0.43 minion3   minion3.novalocal  " >> /etc/hosts
+                echo "10.$TENANT0.0.44 minion4   minion4.novalocal  " >> /etc/hosts
+                echo "10.$TENANT0.0.44 minion5   minion5.novalocal  " >> /etc/hosts
+                ###
+                # Disable SELINUX
+                setenforce Permissive
+                sed -i -e "s/SELINUX=enforcing/SELINUX=permissive/" /etc/selinux/config
+                # disable firewall (lab environment)
+                systemctl stop firewalld
+                systemctl disable firewalld
+                ###
+                # Install EPEL
+                #@@@ yum -y install epel-release
+                # Install nano text editor (for non-native *nix users)
+                # Install jq (JSON CLI processor)
+                #@@@ yum -y install git nano python-virtualenv jq tree
+                ####
+                # Update to latest patch (comment for speed)
+                #@@@ yum -y update
+                ####
+                # Mount NFS Server
+                mkdir -p /data
+                echo -e "10.$TENANT0.0.23:/data\t /data\t nfs\t defaults\t0\t0" >> /etc/fstab
+                #mount /data
+                ###
+                # OpenStack Client Libraries
+                #@@@ yum -y install centos-release-openstack
+                #@@@ yum -y install python-openstackclient
+                ###
+                # Install Ansible
+                #@@@ yum -y install ansible
+                sed -i "/^host_key_checking/c host_key_checking = False" /etc/ansible/hosts.org
+                # Ansible Clients
+                #@@@ echo -e "[docker_nodes]\n#Docker_Nodes IP\n" >> /etc/ansible/hosts
+                ###
+                # Install and configure Docker
+                # (NOTE: will timeout starting docker before reboot due to bug)
+                #@@@ yum -y install docker
+                echo "INSECURE_REGISTRY='--insecure-registry registry.lab:5000 --insecure-registry kube-master:5000' " >> /etc/sysconfig/docker
+                #systemctl start docker 
+                systemctl enable docker
+                ###
+                # Setup Graphical Interface (jumphost)
+                #@@@ yum groupinstall -y "Server with GUI"
+                #@@@ yum groupinstall -y "Development Tools"
+                #@@@ systemctl set-default graphical.target
+                # Disable initial setup  (disabled due to html5 keyboard bug)
+                #sed -i '/\[daemon\]/ a InitialSetupEnable=false' /etc/gdm/custom.conf
+                # Install Gitlab CI Runner
+                curl -L https://packages.gitlab.com/install/repositories/runner/gitlab-ci-multi-runner/script.rpm.sh | bash
+                yum -y install gitlab-ci-multi-runner
+                #
+                reboot
+                ####
+              params:
+                $TENANT: { get_param: tenant_group }
+                $DEVBOX_IP: { get_param: devbox_ip }
+                
+
+# outputs:
+#   devbox_floating_ip:
+#     description: The IP address of the deployed instance
+#     value: { get_attr: [floating_ip_0, floating_ip_address] }
+
+# END OF FILE

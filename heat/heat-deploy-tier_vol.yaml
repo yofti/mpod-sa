@@ -1,0 +1,20 @@
+heat_template_version: 2014-10-16
+description: Deploy Volumes for Kubernetes
+parameters:
+  vol_size:
+    type: string
+    label: Volume Size (GB)
+    description: Volume Size in GB
+    default: 20
+resources:
+  vol1:
+    type: OS::Cinder::Volume
+    properties:
+      name: mongodb_vol
+      size: { get_param: vol_size }
+  vol2:
+    type: OS::Cinder::Volume
+    properties:
+      name: mariadb_vol
+      size: { get_param: vol_size }
+# END OF FILE

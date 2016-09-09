@@ -1,0 +1,212 @@
+heat_template_version: 2014-10-16
+description: Deploy etcd2 Cluster with CoreOS
+parameters:
+  image:
+    type: string
+    description: Image used for servers
+    ## default: CoreOS
+    ## default: CoreOS-1010.1.0
+    default: CoreOS-899.15.0
+  key:
+    type: string
+    description: SSH key to connect to the servers
+    default: mpod-key
+  docker_node_flavor:
+    type: string
+    description: flavor used by docker nodes
+    default: m1.small
+    constraints:
+      - custom_constraint: nova.flavor
+        description: must be a flavor known to Nova
+  private_network:
+    type: string
+    label: Private network name or ID
+    description: Network to attach instance to.
+    ## default: tenant1_net
+    default: dev_mpod_net
+  etcd01_ip:
+    type: string
+    label: etcd01 IP address
+    description: etcd01 IP address
+    default: 10.90.0.31
+  etcd02_ip:
+    type: string
+    label: etcd02 IP address
+    description: etcd01 IP address
+    default: 10.90.0.32
+  etcd03_ip:
+    type: string
+    label: etcd03 IP address
+    description: etcd01 IP address
+    default: 10.90.0.33
+resources:
+
+  etcd01_config:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $ETCD01 : { get_param: etcd01_ip }
+            $ETCD02 : { get_param: etcd02_ip }
+            $ETCD03 : { get_param: etcd03_ip }
+          template: |
+            #cloud-config
+            merge_how: dict(recurse_array)+list(append)
+            write_files:
+              - path: /etc/hosts
+                permissions: '0644'
+                content: |
+                  127.0.0.1   localhost localhost.localdomain
+                  $ETCD01 etcd01 etcd01.novalocal 
+                  $ETCD02 etcd02 etcd02.novalocal
+                  $ETCD03 etcd03 etcd03.novalocal
+            coreos:
+              etcd2:
+                # https://github.com/coreos/etcd/blob/master/Documentation/configuration.md
+                name: "etcd01"
+                initial-cluster: "etcd01=http://$ETCD01:2380,etcd02=http://$ETCD02:2380,etcd03=http://$ETCD03:2380"
+                # multi-region and multi-cloud deployments need to use $public_ipv4
+                advertise-client-urls: "http://$private_ipv4:2379,http://$private_ipv4:4001"
+                initial-advertise-peer-urls: "http://$private_ipv4:2380"
+                # listen on both the official ports and the legacy ports
+                # legacy ports can be omitted if your application doesn't depend on them
+                listen-client-urls: "http://0.0.0.0:2379,http://0.0.0.0:4001"
+                listen-peer-urls: "http://$private_ipv4:2380"
+                initial-cluster-token: "1234567890abcde"
+                initial-cluster-state: new
+              units:
+                - name: etcd2.service
+                  command: start
+              final_message: "DONE!!! After $UPTIME seconds etcd node is finally ready for labs."
+
+  etcd02_config:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $ETCD01 : { get_param: etcd01_ip }
+            $ETCD02 : { get_param: etcd02_ip }
+            $ETCD03 : { get_param: etcd03_ip }
+          template: |
+            #cloud-config
+            merge_how: dict(recurse_array)+list(append)
+            write_files:
+              - path: /etc/hosts
+                permissions: '0644'
+                content: |
+                  127.0.0.1   localhost localhost.localdomain
+                  $ETCD01 etcd01 etcd01.novalocal 
+                  $ETCD02 etcd02 etcd02.novalocal
+                  $ETCD03 etcd03 etcd03.novalocal
+            coreos:
+              etcd2:
+                name: "etcd02"
+                initial-cluster: "etcd01=http://$ETCD01:2380,etcd02=http://$ETCD02:2380,etcd03=http://$ETCD03:2380"
+                advertise-client-urls: "http://$private_ipv4:2379,http://$private_ipv4:4001"
+                initial-advertise-peer-urls: "http://$private_ipv4:2380"
+                listen-client-urls: "http://0.0.0.0:2379,http://0.0.0.0:4001"
+                listen-peer-urls: "http://$private_ipv4:2380"
+                initial-cluster-token: "1234567890abcde"
+                initial-cluster-state: new
+              units:
+                - name: etcd2.service
+                  command: start
+              final_message: "DONE!!! After $UPTIME seconds etcd node is finally ready for labs."
+
+  etcd03_config:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $ETCD01 : { get_param: etcd01_ip }
+            $ETCD02 : { get_param: etcd02_ip }
+            $ETCD03 : { get_param: etcd03_ip }
+          template: |
+            #cloud-config
+            merge_how: dict(recurse_array)+list(append)
+            write_files:
+              - path: /etc/hosts
+                permissions: '0644'
+                content: |
+                  127.0.0.1   localhost localhost.localdomain
+                  $ETCD01 etcd01 etcd01.novalocal 
+                  $ETCD02 etcd02 etcd02.novalocal
+                  $ETCD03 etcd03 etcd03.novalocal
+            coreos:
+              etcd2:
+                name: "etcd03"
+                initial-cluster: "etcd01=http://$ETCD01:2380,etcd02=http://$ETCD02:2380,etcd03=http://$ETCD03:2380"
+                advertise-client-urls: "http://$private_ipv4:2379,http://$private_ipv4:4001"
+                initial-advertise-peer-urls: "http://$private_ipv4:2380"
+                listen-client-urls: "http://0.0.0.0:2379,http://0.0.0.0:4001"
+                listen-peer-urls: "http://$private_ipv4:2380"
+                initial-cluster-token: "1234567890abcde"
+                initial-cluster-state: new
+              units:
+                - name: etcd2.service
+                  command: start
+              final_message: "DONE!!! After $UPTIME seconds etcd node is finally ready for labs."
+            
+  etcd01:
+    type: OS::Nova::Server
+    properties:
+      flavor: { get_param: docker_node_flavor }
+      image: { get_param: image }
+      key_name: { get_param: key }
+      name: etcd01
+      networks:
+        - fixed_ip: { get_param: etcd01_ip }
+          network: { get_param: private_network }
+      security_groups: 
+        - { get_resource: permit_all_secgroup }
+      user_data_format: RAW
+      user_data: { get_resource: etcd01_config }
+
+  etcd02:
+    type: OS::Nova::Server
+    properties:
+      flavor: { get_param: docker_node_flavor }
+      image: { get_param: image }
+      key_name: { get_param: key }
+      name: etcd02
+      networks:
+        - fixed_ip: { get_param: etcd02_ip }
+          network: { get_param: private_network }
+      security_groups: 
+        - { get_resource: permit_all_secgroup }
+      user_data_format: RAW
+      user_data: { get_resource: etcd02_config }
+
+  etcd03:
+    type: OS::Nova::Server
+    properties:
+      flavor: { get_param: docker_node_flavor }
+      image: { get_param: image }
+      key_name: { get_param: key }
+      name: etcd03
+      networks:
+        - fixed_ip: { get_param: etcd03_ip }
+          network: { get_param: private_network }
+      security_groups: 
+        - { get_resource: permit_all_secgroup }
+      user_data_format: RAW
+      user_data: { get_resource: etcd03_config }
+
+  permit_all_secgroup:
+     type: OS::Neutron::SecurityGroup
+     properties:
+      name: permit_all_secgroup
+      rules:
+        - protocol: icmp
+          remote_ip_prefix: 0.0.0.0/0
+        - protocol: tcp
+          remote_ip_prefix: 0.0.0.0/0
+          port_range_min: 1
+          port_range_max: 65535
+        - protocol: udp
+          remote_ip_prefix: 0.0.0.0/0
+          port_range_min: 1
+          port_range_max: 65535

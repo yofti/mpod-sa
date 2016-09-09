@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: jenkins
+  # The labels will be applied automatically
+  # from the labels in the pod template, if not set
+  # labels:
+    # app: jenkins
+spec:
+  replicas: 1
+  # The selector will be applied automatically
+  # from the labels in the pod template, if not set.
+  # selector:
+      # app: jenkins
+  template:
+    metadata:
+      labels:
+        app: jenkins
+    spec:
+      containers:
+        - resources:
+            limits:
+              cpu: 0.1
+          image: jenkins:2.0
+          name: jenkins
+          ports:
+            - containerPort: 8080
+              name: webgui
+            - containerPort: 50000
+              name: executors
+          volumeMounts:
+              # name must match the volume name below
+            - name: jenkins-home
+              # mount path within the container
+              mountPath: /var/jenkins_home
+      volumes:
+        - name: jenkins-home
+          persistentVolumeClaim:
+           claimName: pvcjenkins
+
+
+# kubectl delete service -l app=jenkins
+

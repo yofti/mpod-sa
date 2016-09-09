@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: jenkins
+  name: jenkins
+spec:
+  type: "LoadBalancer"
+  ports:
+    - port: 8080
+      name: webgui
+      targetPort: 8080
+      nodePort: 30080
+    - port: 50000
+      name: executors
+      targetPort: 50000
+      nodePort: 30050
+  selector:
+    app: jenkins

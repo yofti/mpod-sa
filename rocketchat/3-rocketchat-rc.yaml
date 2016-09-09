@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: rocketchat
+  labels:
+    app: rocketchat
+spec:
+  replicas: 1
+  # selector:
+      # app: rocketchat
+  template:
+    metadata:
+      labels:
+        app: rocketchat
+    spec:
+      containers:
+        - resources:
+            limits:
+              cpu: 0.1
+          image: rocket.chat
+          name: rocketchat
+          ports:
+            - containerPort: 3000
+              name: rocketchat
+          env:
+            - name: MONGO_URL
+              # Find the mongo service IP with kubectl
+              #   kubectl describe svc mongo | grep IP
+              value: mongodb://10.254.200.120/rocketdb
+

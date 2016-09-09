@@ -1,0 +1,181 @@
+heat_template_version: 2014-10-16
+description: Deploy nfs_server (persisten storage for microservices)
+parameters:
+  image:
+    type: string
+    description: Image used for servers
+    # default: CentOS7-1602
+    default: mpod-sa-nfs-snap-160420
+  key:
+    type: string
+    description: SSH key to connect to the servers
+    default: mpod-key
+  nfs_server_flavor:
+    type: string
+    description: flavor used by master server
+    default: m1.small
+  private_network:
+    type: string
+    label: Private network name or ID
+    description: Network to attach instance to.
+    ## default: tenant1_net
+    default: dev_mpod_net
+  nfs_server_ip:
+    type: string
+    label: Private Static IP
+    description: Static IP for NFS Server
+    default: 10.90.0.23
+resources:
+  userdata:
+    type: OS::Heat::MultipartMime
+    properties:
+      parts:
+      - config: { get_resource: user_firefly_config }
+      - config: { get_resource: nfs_ganesha_install }
+      - config: { get_resource: nfs_ganesha_config }
+      - config: { get_resource: nfs_ganesha_start }
+      - config: { get_resource: done_message }
+
+  user_firefly_config:
+    type: OS::Heat::CloudConfig 
+    properties:
+      cloud_config:
+        merge_how: dict(recurse_array)+list(append)
+        users:
+          - default
+          - name: firefly
+            gecos: Firefly Educate
+            sudo: ALL=(ALL) NOPASSWD:ALL
+            lock_passwd: false
+            passwd: $1$lab$89a84YXJ0/sRp7gAga9Q./
+          - name: centos
+            sudo: ALL=(ALL) NOPASSWD:ALL
+            lock_passwd: false
+            passwd: $1$lab$89a84YXJ0/sRp7gAga9Q./
+
+  nfs_ganesha_install:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            dummy  : ""
+          template: |
+            #!/bin/bash -v
+            # Disable SELINUX
+            setenforce Permissive
+            sed -i -e "s/SELINUX=enforcing/SELINUX=permissive/" /etc/selinux/config
+            # Install EPEL
+            yum -y install epel-release
+            # Install nano text editor (for non-native *nix users) and git
+            yum -y install nano git
+            # Install NFS Ganesha
+            yum -y install nfs-ganesha nfs-ganesha-vfs
+            # Create export dir
+            mkdir -p /data
+            # Mount persistent volume
+            # mkfs.xfs /dev/vdb
+            # mount -t xfs /dev/vdb /data
+            # echo -e "/dev/vdb\t /data\t xfs\t defaults\t0\t0" >> /etc/fstab
+            # Each export must be owned by nfsnobody and have 777 permissions
+            chown -R nfsnobody:nfsnobody /data
+            chmod 777 /data
+
+
+  nfs_ganesha_config:
+    type: OS::Heat::CloudConfig 
+    properties:
+      cloud_config:
+        merge_how: dict(recurse_array)+list(append)
+        write_files:
+          - path:  /etc/ganesha/ganesha.conf
+            permissions: '0644'
+            content: |
+              EXPORT
+              {
+                Export_Id = 2;
+                Path = /data;
+                Pseudo = /data;
+                Access_Type = RW;
+                Squash = AllSquash;
+                Anonymous_Uid = 65534;
+                Anonymous_Gid = 65534;
+                FSAL
+                  {
+                    Name = VFS;
+                  }
+              }
+
+  nfs_ganesha_start:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $SERVER_IP : { get_param: nfs_server_ip }
+          template: |
+            #!/bin/bash -v
+            # Identify local host/ip 
+            export SERVER_NAME=`hostname`
+            echo "$SERVER_IP   nfs-server nfs-server.novalocal ${SERVER_NAME}" >> /etc/hosts
+            systemctl enable nfs-ganesha
+            systemctl start  nfs-ganesha
+            # Run in clients:  echo -e "$SERVER_IP:/data\t /mnt\t nfs\t defaults\t0\t0" >> /etc/fstab
+
+  done_message:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          params:
+            $SERVER_IP    : { get_param: nfs_server_ip }
+          template: |
+            #cloud-config
+            merge_how: dict(recurse_array)+list(append)
+            final_message: "DONE!!! After $UPTIME seconds $SERVER_IP is finally ready for labs."
+            runcmd:
+              - [reboot]
+
+  nfs_server:
+    type: OS::Nova::Server
+    properties:
+      flavor: { get_param: nfs_server_flavor }
+      image: { get_param: image }
+      key_name: { get_param: key }
+      name: nfs_server
+      networks:
+        - network: { get_param: private_network }
+          fixed_ip: { get_param: nfs_server_ip }
+      security_groups:
+        - { get_resource: nfs_server_secgroup }
+      user_data_format: RAW
+      user_data: { get_resource: userdata }
+
+  nfs_server_secgroup:
+     type: OS::Neutron::SecurityGroup
+     properties:
+      description: Allow all
+      rules:
+        - protocol: icmp
+          remote_ip_prefix: 0.0.0.0/0
+        - protocol: tcp
+          remote_ip_prefix: 0.0.0.0/0
+          port_range_min: 1
+          port_range_max: 65535
+        - protocol: udp
+          remote_ip_prefix: 0.0.0.0/0
+          port_range_min: 1
+          port_range_max: 65535
+
+  # nfs_server_volume:
+  #   type: OS::Cinder::Volume
+  #   properties:
+  #     size: 50
+  # nfs_server_vol_attachment:
+  #   type: OS::Cinder::VolumeAttachment
+  #   properties:
+  #     instance_uuid: { get_resource: nfs_server }
+  #     volume_id: { get_resource: nfs_server_volume }
+  #     mountpoint: "/dev/vdb"
+
+# END OF FILE

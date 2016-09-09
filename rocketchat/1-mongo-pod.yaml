@@ -1,0 +1,24 @@
+kind: Pod
+apiVersion: v1
+metadata:
+  name: mongo
+  labels:
+    name: mongo
+    role: mongo
+spec:
+  containers:
+    - name: mongo
+      image: mongo
+      ports:
+        - name: mongo
+          containerPort: 27017
+      volumeMounts:
+          # name must match the volume name below
+        - name: mongo-cinder-storage
+          # mount path within the container
+          mountPath: /data/db
+  volumes:
+  - name: mongo-cinder-storage
+    cinder:
+     volumeID: 1bbdc006-1fdb-44e7-8a50-fa63353e700b
+     fsType: ext4
